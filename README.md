@@ -2,6 +2,8 @@
 
 Instant search for bookmark folders - find any folder in milliseconds, no matter how many bookmarks you have.
 
+<img width="2368" height="1308" alt="image" src="https://github.com/user-attachments/assets/a37908d5-e8a6-43d9-bdf1-8de975e68c19" />
+
 **Problem**: Finding the right bookmark folder in Chrome's "Add Bookmark" dialog is tedious when you have hundreds of folders.
 
 **Solution**: Real-time search with intelligent ranking that understands folder hierarchies and handles typos.
