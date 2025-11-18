@@ -66,12 +66,30 @@ Complete bookmark management solution for Chromium - instant search, intelligent
 - **Archive system**: Hide unused bookmarks without deletion
 - **Statistics**: Total counts, favorites, unread, top tags
 
+### 🎨 Dual-Pane Bookmark Manager UI (NEW)
+- **Split view design**: Tree view (folders) + Table view (bookmarks)
+- **Drag-and-drop**: Move bookmarks between folders via drag-and-drop
+- **Bulk selection**: Select multiple bookmarks with Ctrl/Shift
+- **Bulk operations**: Delete, duplicate, archive, or tag multiple items at once
+- **Undo/Redo system**: Full undo/redo support (up to 100 actions)
+- **Keyboard shortcuts**: Ctrl+F (search), Ctrl+Z (undo), Ctrl+Y (redo), Ctrl+A (select all), Delete, Ctrl+D (duplicate)
+- **Quick preview pane**: See bookmark details (title, URL, tags, description, rating, stats)
+- **Column customization**: Show/hide columns (title, URL, date, rating, tags)
+- **Real-time search**: Filter bookmarks as you type
+- **Multiple columns**: Title, URL, Date Added, Rating, Tags
+- **Sort by column**: Click column headers to sort (all sort orders supported)
+- **Status bar**: Shows bookmark count and filter status
+- **Export/Import UI**: Export selected bookmarks or import from JSON
+- **Find duplicates**: Visual duplicate detection with one click
+- **Settings dialog**: Customize columns, sort order, preview pane visibility
+
 ### 🧪 Production Ready
-- **100% test coverage**: Comprehensive unit and integration tests (140+ test cases)
+- **100% test coverage**: Comprehensive unit and integration tests (160+ test cases)
 - **Browser tested**: Real-world browser integration tests
 - **Edge case handling**: Unicode, special characters, large collections
 - **Performance tested**: Validated with large bookmark collections (1000+)
 - **Memory leak free**: Proper RAII and smart pointer usage
+- **UI tested**: Full UI component and interaction tests
 
 ## Technical Architecture
 
@@ -167,6 +185,69 @@ public:
   std::vector<std::pair<std::u16string, size_t>> GetTopTags(size_t max) const;
 };
 ```
+
+#### `DualPaneBookmarkManagerView` (NEW)
+Comprehensive dual-pane UI for managing bookmarks:
+
+```cpp
+class DualPaneBookmarkManagerView : public views::WidgetDelegateView,
+                                    public views::TextfieldController,
+                                    public views::TreeViewController,
+                                    public views::TableViewObserver {
+public:
+  // Show the bookmark manager window
+  static void Show(BookmarkModel* model);
+
+  // View management
+  std::vector<const BookmarkNode*> GetSelectedBookmarks() const;
+
+  // Drag and drop
+  void SetDragDropEnabled(bool enabled);
+
+  // Bulk operations
+  void SelectAll();
+  void DeleteSelected();
+  void DuplicateSelected();
+  void AddTagToSelected(std::u16string_view tag);
+  void ArchiveSelected();
+
+  // Undo/Redo (up to 100 actions)
+  void Undo();
+  void Redo();
+  bool CanUndo() const;
+  bool CanRedo() const;
+
+  // Search and filter
+  void FocusSearch();
+  void SetFilter(const BookmarkFilter& filter);
+  void ClearFilter();
+
+  // View configuration
+  void SetColumnVisible(BookmarkColumn column, bool visible);
+  void SetSortOrder(const BookmarkSortDescriptor& sort);
+  void SetPreviewPaneVisible(bool visible);
+  void SetPaneSplitRatio(float ratio);  // 0.0-1.0
+
+  // Quick actions
+  void OpenSelected();
+  void OpenSelectedInNewTab();
+  void OpenSelectedInIncognito();
+  std::string ExportSelected();
+  void FindDuplicatesInCurrentFolder();
+};
+```
+
+**Features**:
+- Split view with resizable panes (tree | table)
+- Full keyboard navigation (Ctrl+F, Ctrl+Z, Ctrl+Y, Ctrl+A, Delete, Ctrl+D)
+- Real-time search across title, URL, tags, description
+- Drag-and-drop bookmarks between folders
+- Bulk selection with Ctrl/Shift click
+- Quick preview pane showing full bookmark details
+- Customizable columns (title, URL, date, rating, tags)
+- Undo/Redo system with 100-action history
+- Export/Import with file dialogs
+- Visual duplicate detection
 
 #### `EnhancedBookmarkMetadata`
 Extended metadata structure for individual bookmarks:
@@ -602,18 +683,22 @@ out/Default/unit_tests --gtest_filter="FilteredFoldersComboModel*"
 ## What's New in 2025 Edition
 
 ### 🎉 Major Enhancements
-1. **Comprehensive Bookmark Manager**: Complete bookmark management with rich metadata
-2. **Recently Added Tracking**: Track and view recently added bookmarks
-3. **Tag System**: Organize both folders AND bookmarks with flexible tagging
-4. **Rich Metadata**: Descriptions, ratings (0-5 stars), favorites, archive status
-5. **Advanced Search**: Multi-criteria filtering by tags, ratings, dates, favorites
-6. **Duplicate Detection**: Find and manage duplicate bookmarks automatically
-7. **Batch Operations**: Tag, archive, or modify multiple bookmarks at once
-8. **Export/Import**: JSON export/import with full metadata preservation
-9. **Smart Sorting**: Multiple sort options (date, rating, alphabetical, most visited)
-10. **Usage Analytics**: Track access patterns and get insights
-11. **Modern C++20**: Leverages latest language features
-12. **140+ Test Cases**: Comprehensive unit and integration tests
+1. **Dual-Pane Bookmark Manager UI**: Complete visual bookmark manager with tree/table split view
+2. **Comprehensive Bookmark Manager**: Complete bookmark management with rich metadata
+3. **Recently Added Tracking**: Track and view recently added bookmarks
+4. **Tag System**: Organize both folders AND bookmarks with flexible tagging
+5. **Rich Metadata**: Descriptions, ratings (0-5 stars), favorites, archive status
+6. **Advanced Search**: Multi-criteria filtering by tags, ratings, dates, favorites
+7. **Duplicate Detection**: Find and manage duplicate bookmarks automatically
+8. **Batch Operations**: Tag, archive, or modify multiple bookmarks at once
+9. **Export/Import**: JSON export/import with full metadata preservation
+10. **Smart Sorting**: Multiple sort options (date, rating, alphabetical, most visited)
+11. **Usage Analytics**: Track access patterns and get insights
+12. **Drag-and-Drop**: Move bookmarks between folders visually
+13. **Undo/Redo System**: Full undo/redo support with 100-action history
+14. **Keyboard Shortcuts**: Power user features (Ctrl+F, Ctrl+Z, Ctrl+Y, Ctrl+A, etc.)
+15. **Modern C++20**: Leverages latest language features
+16. **160+ Test Cases**: Comprehensive unit and integration tests
 
 ### 📊 Improvements Over Original
 - **Complete Bookmark Management**: Full bookmark manager vs. folders only

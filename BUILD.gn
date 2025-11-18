@@ -20,6 +20,8 @@
     "filtered_folders_combo_model.h",
     "bookmark_manager.cc",
     "bookmark_manager.h",
+    "dual_pane_bookmark_manager_view.cc",
+    "dual_pane_bookmark_manager_view.h",
   ]
 
   deps += [
@@ -28,6 +30,8 @@
     "//chrome/browser/bookmarks",
     "//components/bookmarks/browser",
     "//ui/base",
+    "//ui/gfx",
+    "//ui/views",
   ]
 """
 
@@ -39,6 +43,7 @@ source_set("unit_tests") {
   sources = [
     "filtered_folders_combo_model_unittest.cc",
     "bookmark_manager_unittest.cc",
+    "dual_pane_bookmark_manager_view_unittest.cc",
   ]
 
   deps = [
@@ -49,6 +54,7 @@ source_set("unit_tests") {
     "//components/bookmarks/browser",
     "//components/bookmarks/test",
     "//testing/gtest",
+    "//ui/views:test_support",
   ]
 }
 """
