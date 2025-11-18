@@ -1,4 +1,4 @@
-// Copyright 2024 The Chromium Authors
+// Copyright 2025 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <ranges>
 
 #include "base/check.h"
 #include "base/i18n/string_search.h"
 #include "base/strings/string_util.h"
+#include "base/time/time.h"
 #include "chrome/grit/generated_resources.h"  // nogncheck (kept if needed by build deps)
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node.h"
@@ -34,9 +36,9 @@ FilteredFoldersComboModel::~FilteredFoldersComboModel() {
 }
 
 void FilteredFoldersComboModel::SetSearchFilter(
-    const std::u16string& search_text) {
+    std::u16string_view search_text) {
   if (search_filter_ != search_text) {
-    search_filter_ = search_text;
+    search_filter_ = std::u16string(search_text);
     lower_filter_ = base::ToLowerASCII(search_filter_);
 
     // Store the currently selected item text before filtering
@@ -244,8 +246,198 @@ void FilteredFoldersComboModel::MaybeChangeParent(
       filtered_entries_[selected_index].kind != EntryKind::kUnderlying) {
     return;
   }
+  const bookmarks::BookmarkNode* target_node =
+      underlying_model_->GetNodeAt(GetUnderlyingIndex(selected_index));
+  if (target_node) {
+    RecordFolderAccess(target_node);
+  }
   underlying_model_->MaybeChangeParent(node,
                                        GetUnderlyingIndex(selected_index));
+}
+
+// Tag management implementation
+void FilteredFoldersComboModel::AddTagToFolder(
+    const bookmarks::BookmarkNode* node,
+    std::u16string_view tag) {
+  if (!node || tag.empty()) {
+    return;
+  }
+
+  auto& metadata = GetOrCreateMetadata(node);
+  std::u16string tag_str(tag);
+
+  // Check if tag already exists
+  if (std::ranges::find(metadata.tags, tag_str) == metadata.tags.end()) {
+    metadata.tags.push_back(tag_str);
+  }
+}
+
+void FilteredFoldersComboModel::RemoveTagFromFolder(
+    const bookmarks::BookmarkNode* node,
+    std::u16string_view tag) {
+  if (!node) {
+    return;
+  }
+
+  const int64_t node_id = node->id();
+  auto it = node_metadata_.find(node_id);
+  if (it != node_metadata_.end()) {
+    auto& tags = it->second.tags;
+    std::erase_if(tags,
+                  [tag](const std::u16string& t) { return t == tag; });
+  }
+}
+
+std::vector<std::u16string> FilteredFoldersComboModel::GetTagsForFolder(
+    const bookmarks::BookmarkNode* node) const {
+  if (!node) {
+    return {};
+  }
+
+  const int64_t node_id = node->id();
+  auto it = node_metadata_.find(node_id);
+  if (it != node_metadata_.end()) {
+    return it->second.tags;
+  }
+  return {};
+}
+
+std::vector<std::u16string> FilteredFoldersComboModel::GetAllTags() const {
+  std::unordered_set<std::u16string> unique_tags;
+  for (const auto& [node_id, metadata] : node_metadata_) {
+    for (const auto& tag : metadata.tags) {
+      unique_tags.insert(tag);
+    }
+  }
+  return std::vector<std::u16string>(unique_tags.begin(), unique_tags.end());
+}
+
+// Description management
+void FilteredFoldersComboModel::SetFolderDescription(
+    const bookmarks::BookmarkNode* node,
+    std::u16string_view description) {
+  if (!node) {
+    return;
+  }
+
+  auto& metadata = GetOrCreateMetadata(node);
+  metadata.description = std::u16string(description);
+}
+
+std::u16string FilteredFoldersComboModel::GetFolderDescription(
+    const bookmarks::BookmarkNode* node) const {
+  if (!node) {
+    return std::u16string();
+  }
+
+  const int64_t node_id = node->id();
+  auto it = node_metadata_.find(node_id);
+  if (it != node_metadata_.end()) {
+    return it->second.description;
+  }
+  return std::u16string();
+}
+
+// Metadata management
+const BookmarkMetadata* FilteredFoldersComboModel::GetMetadata(
+    const bookmarks::BookmarkNode* node) const {
+  if (!node) {
+    return nullptr;
+  }
+
+  const int64_t node_id = node->id();
+  auto it = node_metadata_.find(node_id);
+  if (it != node_metadata_.end()) {
+    return &it->second;
+  }
+  return nullptr;
+}
+
+void FilteredFoldersComboModel::RecordFolderAccess(
+    const bookmarks::BookmarkNode* node) {
+  if (!node) {
+    return;
+  }
+
+  auto& metadata = GetOrCreateMetadata(node);
+  metadata.access_count++;
+  metadata.last_accessed = base::Time::Now();
+}
+
+// Smart folder detection
+std::vector<const bookmarks::BookmarkNode*>
+FilteredFoldersComboModel::GetFrequentlyUsedFolders(size_t max_count) const {
+  std::vector<std::pair<const bookmarks::BookmarkNode*, int>> folder_counts;
+
+  for (const auto& [node_id, metadata] : node_metadata_) {
+    if (metadata.access_count > 0 && bookmark_model_) {
+      const bookmarks::BookmarkNode* node =
+          bookmarks::GetBookmarkNodeByID(bookmark_model_, node_id);
+      if (node && node->is_folder()) {
+        folder_counts.emplace_back(node, metadata.access_count);
+      }
+    }
+  }
+
+  // Sort by access count (descending)
+  std::ranges::sort(folder_counts, [](const auto& a, const auto& b) {
+    return a.second > b.second;
+  });
+
+  std::vector<const bookmarks::BookmarkNode*> result;
+  const size_t count = std::min(max_count, folder_counts.size());
+  for (size_t i = 0; i < count; ++i) {
+    result.push_back(folder_counts[i].first);
+  }
+
+  return result;
+}
+
+std::vector<const bookmarks::BookmarkNode*>
+FilteredFoldersComboModel::GetRecentlyUsedFolders(size_t max_count) const {
+  std::vector<std::pair<const bookmarks::BookmarkNode*, base::Time>>
+      folder_times;
+
+  for (const auto& [node_id, metadata] : node_metadata_) {
+    if (!metadata.last_accessed.is_null() && bookmark_model_) {
+      const bookmarks::BookmarkNode* node =
+          bookmarks::GetBookmarkNodeByID(bookmark_model_, node_id);
+      if (node && node->is_folder()) {
+        folder_times.emplace_back(node, metadata.last_accessed);
+      }
+    }
+  }
+
+  // Sort by last accessed time (most recent first)
+  std::ranges::sort(folder_times, [](const auto& a, const auto& b) {
+    return a.second > b.second;
+  });
+
+  std::vector<const bookmarks::BookmarkNode*> result;
+  const size_t count = std::min(max_count, folder_times.size());
+  for (size_t i = 0; i < count; ++i) {
+    result.push_back(folder_times[i].first);
+  }
+
+  return result;
+}
+
+// Tag filtering
+void FilteredFoldersComboModel::SetTagFilter(
+    const std::vector<std::u16string>& tags) {
+  tag_filters_ = tags;
+  UpdateFilteredIndices();
+  for (ui::ComboboxModelObserver& observer : observers()) {
+    observer.OnComboboxModelChanged(this);
+  }
+}
+
+void FilteredFoldersComboModel::ClearTagFilter() {
+  tag_filters_.clear();
+  UpdateFilteredIndices();
+  for (ui::ComboboxModelObserver& observer : observers()) {
+    observer.OnComboboxModelChanged(this);
+  }
 }
 
 void FilteredFoldersComboModel::UpdateFilteredIndices() {
@@ -257,9 +449,9 @@ void FilteredFoldersComboModel::UpdateFilteredIndices() {
   // Recompute from scratch on each change.
   suggestions_end_index_.reset();
 
-  // Fast path: with an empty filter, preserve the underlying ordering
-  // including titles and any separators so headers render correctly.
-  if (search_filter_.empty()) {
+  // Fast path: with an empty filter and no tag filters, preserve the underlying
+  // ordering including titles and any separators so headers render correctly.
+  if (search_filter_.empty() && tag_filters_.empty()) {
     for (size_t i = 0; i < item_count; ++i) {
       filtered_entries_.push_back({EntryKind::kUnderlying, i});
     }
@@ -282,6 +474,15 @@ void FilteredFoldersComboModel::UpdateFilteredIndices() {
     if (underlying_model_->IsItemTitleAt(i)) {
       continue;
     }
+
+    // Apply tag filter if active
+    if (!tag_filters_.empty()) {
+      const bookmarks::BookmarkNode* node = underlying_model_->GetNodeAt(i);
+      if (!node || !MatchesTagFilter(node)) {
+        continue;
+      }
+    }
+
     const int score = GetMatchScore(i);
     if (search_filter_.empty() || score > 0) {
       matched_indices.push_back(i);
@@ -363,7 +564,7 @@ void FilteredFoldersComboModel::UpdateFilteredIndices() {
 }
 
 bool FilteredFoldersComboModel::MatchesFilter(
-    const std::u16string& text) const {
+    std::u16string_view text) const {
   if (search_filter_.empty()) {
     return true;
   }
@@ -371,7 +572,7 @@ bool FilteredFoldersComboModel::MatchesFilter(
   size_t match_index = 0;
   size_t match_length = 0;
   return base::i18n::StringSearchIgnoringCaseAndAccents(
-      search_filter_, text, &match_index, &match_length);
+      search_filter_, std::u16string(text), &match_index, &match_length);
 }
 
 bool FilteredFoldersComboModel::MatchesFilterWithContext(
@@ -386,25 +587,25 @@ bool FilteredFoldersComboModel::MatchesFilterWithContext(
 }
 
 bool FilteredFoldersComboModel::FuzzyMatchesFilter(
-    const std::u16string& text) const {
+    std::u16string_view text) const {
   if (search_filter_.empty()) {
     return true;
   }
 
   // Convert both strings to lowercase for case-insensitive fuzzy matching
-  std::u16string lower_text = base::ToLowerASCII(text);
-  std::u16string lower_filter = base::ToLowerASCII(search_filter_);
+  const std::u16string lower_text = base::ToLowerASCII(text);
+  const std::u16string lower_filter = base::ToLowerASCII(search_filter_);
 
   // Check if all characters in the filter appear in order in the text
   size_t text_pos = 0;
-  for (char16_t filter_char : lower_filter) {
+  for (const char16_t filter_char : lower_filter) {
     // Skip spaces in the filter
-    if (filter_char == ' ') {
+    if (filter_char == u' ') {
       continue;
     }
 
     // Find the next occurrence of this character
-    size_t found = lower_text.find(filter_char, text_pos);
+    const size_t found = lower_text.find(filter_char, text_pos);
     if (found == std::u16string::npos) {
       return false;
     }
@@ -438,10 +639,42 @@ std::u16string FilteredFoldersComboModel::GetFullPath(
   std::reverse(path_parts.begin(), path_parts.end());
 
   // Join with " > " separator and cache by node id
-  const long long node_id = static_cast<long long>(node->id());
+  const int64_t node_id = node->id();
   std::u16string joined = base::JoinString(path_parts, u" > ");
   node_id_to_full_path_cache_.emplace(node_id, joined);
   return joined;
+}
+
+bool FilteredFoldersComboModel::MatchesTagFilter(
+    const bookmarks::BookmarkNode* node) const {
+  if (!node || tag_filters_.empty()) {
+    return true;
+  }
+
+  const int64_t node_id = node->id();
+  const auto it = node_metadata_.find(node_id);
+  if (it == node_metadata_.end()) {
+    return false;  // No metadata means no tags, doesn't match tag filter
+  }
+
+  const auto& node_tags = it->second.tags;
+  // Check if node has any of the filtered tags
+  return std::ranges::any_of(
+      tag_filters_, [&node_tags](const std::u16string& filter_tag) {
+        return std::ranges::find(node_tags, filter_tag) != node_tags.end();
+      });
+}
+
+BookmarkMetadata& FilteredFoldersComboModel::GetOrCreateMetadata(
+    const bookmarks::BookmarkNode* node) {
+  const int64_t node_id = node->id();
+  auto it = node_metadata_.find(node_id);
+  if (it == node_metadata_.end()) {
+    BookmarkMetadata metadata;
+    metadata.created = base::Time::Now();
+    it = node_metadata_.emplace(node_id, std::move(metadata)).first;
+  }
+  return it->second;
 }
 
 int FilteredFoldersComboModel::GetMatchScore(size_t underlying_index) const {
@@ -460,17 +693,23 @@ int FilteredFoldersComboModel::GetMatchScore(size_t underlying_index) const {
     return -1;
   }
 
-  std::u16string folder_name = underlying_model_->GetItemAt(underlying_index);
-  std::u16string full_path = GetFullPath(node);
-  std::u16string lower_name = base::ToLowerASCII(folder_name);
-  std::u16string lower_path = base::ToLowerASCII(full_path);
+  const std::u16string folder_name =
+      underlying_model_->GetItemAt(underlying_index);
+  const std::u16string full_path = GetFullPath(node);
+  const std::u16string lower_name = base::ToLowerASCII(folder_name);
+  const std::u16string lower_path = base::ToLowerASCII(full_path);
 
-  // Scoring system:
+  // Enhanced scoring system:
   // 100 points - Exact match of folder name
+  // 95 points - Exact tag match
   // 90 points - Folder name starts with filter
+  // 85 points - Description exact match
   // 80 points - Folder name contains filter as substring
+  // 75 points - Tag substring match
   // 70 points - Path contains filter as substring
+  // 65 points - Description substring match
   // 60 points - Fuzzy match on folder name
+  // 55 points - Fuzzy tag match
   // 50 points - Parent folder matches
   // Lower scores for less relevant matches
 
@@ -478,8 +717,28 @@ int FilteredFoldersComboModel::GetMatchScore(size_t underlying_index) const {
     return 100;
   }
 
+  // Check tags for exact match
+  const auto* metadata = GetMetadata(node);
+  if (metadata) {
+    for (const auto& tag : metadata->tags) {
+      const std::u16string lower_tag = base::ToLowerASCII(tag);
+      if (lower_tag == lower_filter_) {
+        return 95;
+      }
+    }
+  }
+
   if (lower_name.find(lower_filter_) == 0) {
     return 90;
+  }
+
+  // Check description for exact match
+  if (metadata && !metadata->description.empty()) {
+    const std::u16string lower_desc =
+        base::ToLowerASCII(metadata->description);
+    if (lower_desc == lower_filter_) {
+      return 85;
+    }
   }
 
   size_t match_index = 0;
@@ -489,12 +748,40 @@ int FilteredFoldersComboModel::GetMatchScore(size_t underlying_index) const {
     return 80;
   }
 
+  // Check tags for substring match
+  if (metadata) {
+    for (const auto& tag : metadata->tags) {
+      if (base::i18n::StringSearchIgnoringCaseAndAccents(
+              search_filter_, tag, &match_index, &match_length)) {
+        return 75;
+      }
+    }
+  }
+
   if (lower_path.find(lower_filter_) != std::u16string::npos) {
     return 70;
   }
 
+  // Check description for substring match
+  if (metadata && !metadata->description.empty()) {
+    if (base::i18n::StringSearchIgnoringCaseAndAccents(
+            search_filter_, metadata->description, &match_index,
+            &match_length)) {
+      return 65;
+    }
+  }
+
   if (FuzzyMatchesFilter(folder_name)) {
     return 60;
+  }
+
+  // Check tags for fuzzy match
+  if (metadata) {
+    for (const auto& tag : metadata->tags) {
+      if (FuzzyMatchesFilter(tag)) {
+        return 55;
+      }
+    }
   }
 
   // Check parent match

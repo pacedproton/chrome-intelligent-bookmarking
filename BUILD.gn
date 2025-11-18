@@ -1,0 +1,132 @@
+# Copyright 2025 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# This BUILD.gn file is for integrating into chromium/src/chrome/browser/ui/bookmarks/BUILD.gn
+
+# To integrate this into Chromium:
+# 1. Copy filtered_folders_combo_model.{cc,h} to chrome/browser/ui/bookmarks/
+# 2. Copy the test files to the same directory
+# 3. Add the sources below to the existing static_library("bookmarks") target
+# 4. Add the unit_tests target to the test("unit_tests") target
+# 5. Add the browser_tests target to the test("browser_tests") target
+
+# Example integration into chrome/browser/ui/bookmarks/BUILD.gn:
+
+# Add to static_library("bookmarks") sources:
+"""
+  sources += [
+    "filtered_folders_combo_model.cc",
+    "filtered_folders_combo_model.h",
+  ]
+
+  deps += [
+    "//base",
+    "//base:i18n",
+    "//chrome/browser/bookmarks",
+    "//components/bookmarks/browser",
+    "//ui/base",
+  ]
+"""
+
+# Add unit tests:
+"""
+source_set("unit_tests") {
+  testonly = true
+
+  sources = [
+    "filtered_folders_combo_model_unittest.cc",
+  ]
+
+  deps = [
+    ":bookmarks",
+    "//base",
+    "//base/test:test_support",
+    "//chrome/test:test_support",
+    "//components/bookmarks/browser",
+    "//components/bookmarks/test",
+    "//testing/gtest",
+  ]
+}
+"""
+
+# Add browser tests:
+"""
+source_set("browser_tests") {
+  testonly = true
+
+  sources = [
+    "filtered_folders_combo_model_browsertest.cc",
+  ]
+
+  defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+
+  deps = [
+    ":bookmarks",
+    "//base",
+    "//chrome/browser",
+    "//chrome/browser/bookmarks",
+    "//chrome/test:test_support",
+    "//components/bookmarks/browser",
+    "//components/bookmarks/test",
+    "//content/test:test_support",
+    "//testing/gtest",
+  ]
+}
+"""
+
+# Standalone BUILD.gn (for reference and testing outside of Chromium tree):
+
+if (!defined(is_chromium_build) || !is_chromium_build) {
+  # Minimal standalone configuration
+  config("filtered_folders_config") {
+    include_dirs = [ "." ]
+  }
+
+  static_library("filtered_folders_combo_model") {
+    sources = [
+      "filtered_folders_combo_model.cc",
+      "filtered_folders_combo_model.h",
+    ]
+
+    public_configs = [ ":filtered_folders_config" ]
+
+    # In a real Chromium build, these would be:
+    # deps = [
+    #   "//base",
+    #   "//base:i18n",
+    #   "//chrome/browser/ui/bookmarks",
+    #   "//components/bookmarks/browser",
+    #   "//ui/base",
+    # ]
+  }
+
+  # Unit tests target
+  test("filtered_folders_combo_model_unittests") {
+    sources = [ "filtered_folders_combo_model_unittest.cc" ]
+
+    deps = [
+      ":filtered_folders_combo_model",
+      # "//base",
+      # "//base/test:test_support",
+      # "//components/bookmarks/browser",
+      # "//components/bookmarks/test",
+      # "//testing/gtest",
+    ]
+  }
+
+  # Browser tests target
+  test("filtered_folders_combo_model_browsertests") {
+    sources = [ "filtered_folders_combo_model_browsertest.cc" ]
+
+    deps = [
+      ":filtered_folders_combo_model",
+      # "//base",
+      # "//chrome/browser",
+      # "//chrome/test:test_support",
+      # "//components/bookmarks/browser",
+      # "//content/test:test_support",
+      # "//testing/gtest",
+    ]
+  }
+}

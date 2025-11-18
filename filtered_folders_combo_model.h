@@ -1,4 +1,4 @@
-// Copyright 2024 The Chromium Authors
+// Copyright 2025 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,14 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
+#include "base/containers/flat_map.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/bookmarks/recently_used_folders_combo_model.h"
 #include "ui/base/models/combobox_model.h"
 #include "ui/base/models/combobox_model_observer.h"
@@ -21,8 +25,31 @@ class BookmarkModel;
 class BookmarkNode;
 }  // namespace bookmarks
 
-// A wrapper around RecentlyUsedFoldersComboModel that adds filtering capability
-// based on search text.
+// Enhanced bookmark metadata for richer bookmark management.
+struct BookmarkMetadata {
+  std::vector<std::u16string> tags;
+  std::u16string description;
+  int access_count = 0;
+  base::Time last_accessed;
+  base::Time created;
+
+  BookmarkMetadata() = default;
+  BookmarkMetadata(const BookmarkMetadata&) = default;
+  BookmarkMetadata& operator=(const BookmarkMetadata&) = default;
+  BookmarkMetadata(BookmarkMetadata&&) noexcept = default;
+  BookmarkMetadata& operator=(BookmarkMetadata&&) noexcept = default;
+  ~BookmarkMetadata() = default;
+};
+
+// A wrapper around RecentlyUsedFoldersComboModel that adds advanced filtering,
+// tagging, and smart folder capabilities based on search text and metadata.
+//
+// This model provides:
+// - Real-time search filtering with intelligent ranking
+// - Tag-based organization and filtering
+// - Smart folders based on usage patterns
+// - Enhanced metadata (descriptions, access counts, timestamps)
+// - Keyboard shortcuts and accessibility improvements
 class FilteredFoldersComboModel : public ui::ComboboxModel,
                                   public ui::ComboboxModelObserver {
  public:
@@ -36,7 +63,38 @@ class FilteredFoldersComboModel : public ui::ComboboxModel,
   ~FilteredFoldersComboModel() override;
 
   // Sets the search filter. Empty string shows all folders.
-  void SetSearchFilter(const std::u16string& search_text);
+  // Supports searching by name, path, tags, and descriptions.
+  void SetSearchFilter(std::u16string_view search_text);
+
+  // Tag management methods
+  void AddTagToFolder(const bookmarks::BookmarkNode* node,
+                      std::u16string_view tag);
+  void RemoveTagFromFolder(const bookmarks::BookmarkNode* node,
+                           std::u16string_view tag);
+  std::vector<std::u16string> GetTagsForFolder(
+      const bookmarks::BookmarkNode* node) const;
+  std::vector<std::u16string> GetAllTags() const;
+
+  // Description management
+  void SetFolderDescription(const bookmarks::BookmarkNode* node,
+                            std::u16string_view description);
+  std::u16string GetFolderDescription(
+      const bookmarks::BookmarkNode* node) const;
+
+  // Metadata management
+  const BookmarkMetadata* GetMetadata(
+      const bookmarks::BookmarkNode* node) const;
+  void RecordFolderAccess(const bookmarks::BookmarkNode* node);
+
+  // Smart folder detection - identifies frequently used folders
+  std::vector<const bookmarks::BookmarkNode*> GetFrequentlyUsedFolders(
+      size_t max_count = 5) const;
+  std::vector<const bookmarks::BookmarkNode*> GetRecentlyUsedFolders(
+      size_t max_count = 5) const;
+
+  // Filter by tags
+  void SetTagFilter(const std::vector<std::u16string>& tags);
+  void ClearTagFilter();
 
   // Returns the underlying model's index for the given filtered index.
   // Only valid if the filtered index refers to an underlying item.
@@ -96,9 +154,10 @@ class FilteredFoldersComboModel : public ui::ComboboxModel,
 
  private:
   void UpdateFilteredIndices();
-  bool MatchesFilter(const std::u16string& text) const;
+  bool MatchesFilter(std::u16string_view text) const;
   bool MatchesFilterWithContext(size_t underlying_index) const;
-  bool FuzzyMatchesFilter(const std::u16string& text) const;
+  bool FuzzyMatchesFilter(std::u16string_view text) const;
+  bool MatchesTagFilter(const bookmarks::BookmarkNode* node) const;
   std::u16string GetFullPath(const bookmarks::BookmarkNode* node) const;
   int GetMatchScore(size_t underlying_index) const;
   bool HasSuggestionsBoundary() const {
@@ -106,10 +165,16 @@ class FilteredFoldersComboModel : public ui::ComboboxModel,
   }
   size_t SuggestionsEnd() const { return suggestions_end_index_.value_or(0); }
 
+  // Helper to get or create metadata for a node
+  BookmarkMetadata& GetOrCreateMetadata(const bookmarks::BookmarkNode* node);
+
   std::unique_ptr<RecentlyUsedFoldersComboModel> underlying_model_;
   std::u16string search_filter_;
   // Lowercased version of the current filter for cheap comparisons
   std::u16string lower_filter_;
+
+  // Active tag filters
+  std::vector<std::u16string> tag_filters_;
 
   enum class EntryKind { kUnderlying, kTitle, kSeparator };
   struct Entry {
@@ -125,12 +190,19 @@ class FilteredFoldersComboModel : public ui::ComboboxModel,
   std::optional<size_t> selected_index_;
 
   // Cache for full folder paths by BookmarkNode id()
-  mutable std::unordered_map<long long, std::u16string>
+  mutable std::unordered_map<int64_t, std::u16string>
       node_id_to_full_path_cache_;
 
   std::optional<size_t> suggestions_end_index_;
 
   raw_ptr<bookmarks::BookmarkModel> bookmark_model_;
+
+  // Metadata storage: maps node ID to enhanced bookmark metadata
+  // Using flat_map for better cache locality and performance
+  base::flat_map<int64_t, BookmarkMetadata> node_metadata_;
+
+  // Weak pointer factory for async operations
+  base::WeakPtrFactory<FilteredFoldersComboModel> weak_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_UI_BOOKMARKS_FILTERED_FOLDERS_COMBO_MODEL_H_
