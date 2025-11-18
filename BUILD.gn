@@ -5,7 +5,7 @@
 # This BUILD.gn file is for integrating into chromium/src/chrome/browser/ui/bookmarks/BUILD.gn
 
 # To integrate this into Chromium:
-# 1. Copy filtered_folders_combo_model.{cc,h} to chrome/browser/ui/bookmarks/
+# 1. Copy all source files to chrome/browser/ui/bookmarks/
 # 2. Copy the test files to the same directory
 # 3. Add the sources below to the existing static_library("bookmarks") target
 # 4. Add the unit_tests target to the test("unit_tests") target
@@ -18,6 +18,8 @@
   sources += [
     "filtered_folders_combo_model.cc",
     "filtered_folders_combo_model.h",
+    "bookmark_manager.cc",
+    "bookmark_manager.h",
   ]
 
   deps += [
@@ -36,6 +38,7 @@ source_set("unit_tests") {
 
   sources = [
     "filtered_folders_combo_model_unittest.cc",
+    "bookmark_manager_unittest.cc",
   ]
 
   deps = [
