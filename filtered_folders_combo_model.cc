@@ -2,6 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// FilteredFoldersComboModel implementation.
+//
+// This file implements an enhanced bookmark folder selection model with:
+// - Multi-criteria search (name, path, tags, descriptions)
+// - Intelligent ranking with 11-tier scoring system
+// - Tag-based organization and filtering
+// - Smart folder recommendations (frequently/recently used)
+// - Rich metadata (descriptions, access tracking, timestamps)
+//
+// Performance characteristics:
+// - Search filtering: O(n) where n = number of folders
+// - Sorting: O(n log n) using stable_sort
+// - Memory: O(n) for metadata storage using flat_map for cache locality
+//
+// Thread safety: Not thread-safe. Must be used on UI thread only.
+
 #include "chrome/browser/ui/bookmarks/filtered_folders_combo_model.h"
 
 #include <algorithm>
@@ -9,6 +25,7 @@
 #include <ranges>
 
 #include "base/check.h"
+#include "base/check_op.h"
 #include "base/i18n/string_search.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
@@ -23,6 +40,7 @@ FilteredFoldersComboModel::FilteredFoldersComboModel(
     : underlying_model_(
           std::make_unique<RecentlyUsedFoldersComboModel>(model, node)),
       bookmark_model_(model) {
+  DCHECK(model) << "BookmarkModel must not be null";
   underlying_model_->AddObserver(static_cast<ui::ComboboxModelObserver*>(this));
   UpdateFilteredIndices();
   selected_index_ = GetDefaultIndex();
@@ -92,8 +110,11 @@ void FilteredFoldersComboModel::SetSearchFilter(
 
 size_t FilteredFoldersComboModel::GetUnderlyingIndex(
     size_t filtered_index) const {
-  CHECK_LT(filtered_index, filtered_entries_.size());
-  DCHECK_EQ(filtered_entries_[filtered_index].kind, EntryKind::kUnderlying);
+  CHECK_LT(filtered_index, filtered_entries_.size())
+      << "Filtered index out of range: " << filtered_index
+      << " >= " << filtered_entries_.size();
+  DCHECK_EQ(filtered_entries_[filtered_index].kind, EntryKind::kUnderlying)
+      << "Filtered index does not refer to an underlying item";
   return filtered_entries_[filtered_index].underlying_index;
 }
 
@@ -260,13 +281,17 @@ void FilteredFoldersComboModel::AddTagToFolder(
     const bookmarks::BookmarkNode* node,
     std::u16string_view tag) {
   if (!node || tag.empty()) {
+    DCHECK(node) << "Cannot add tag to null node";
+    DCHECK(!tag.empty()) << "Cannot add empty tag";
     return;
   }
+
+  DCHECK(node->is_folder()) << "Tags can only be added to folder nodes";
 
   auto& metadata = GetOrCreateMetadata(node);
   std::u16string tag_str(tag);
 
-  // Check if tag already exists
+  // Check if tag already exists to avoid duplicates
   if (std::ranges::find(metadata.tags, tag_str) == metadata.tags.end()) {
     metadata.tags.push_back(tag_str);
   }
@@ -441,12 +466,31 @@ void FilteredFoldersComboModel::ClearTagFilter() {
 }
 
 void FilteredFoldersComboModel::UpdateFilteredIndices() {
+  // Rebuilds the filtered entries list based on current search filter and
+  // tag filters. This method implements the core filtering and ranking logic.
+  //
+  // Algorithm overview:
+  // 1. Fast path: If no filters are active, passthrough all items
+  // 2. Score all items using GetMatchScore()
+  // 3. Sort by score (highest first) while maintaining stable order
+  // 4. Separate into "suggestions" (top N) and "other matches"
+  // 5. Rebuild filtered_entries_ with suggestions, separator, other matches
+  //
+  // Performance: O(n log n) where n = number of folders
+  // - O(n) for scoring each item
+  // - O(n log n) for stable sort
+  // - O(n) for rebuilding filtered_entries_
+  //
+  // Memory: O(n) temporary vector for matched indices
+
   filtered_entries_.clear();
   if (!underlying_model_) {
     return;
   }
+
   const size_t item_count = underlying_model_->GetItemCount();
-  // Recompute from scratch on each change.
+
+  // Reset suggestions boundary marker
   suggestions_end_index_.reset();
 
   // Fast path: with an empty filter and no tag filters, preserve the underlying
@@ -667,22 +711,30 @@ bool FilteredFoldersComboModel::MatchesTagFilter(
 
 BookmarkMetadata& FilteredFoldersComboModel::GetOrCreateMetadata(
     const bookmarks::BookmarkNode* node) {
+  DCHECK(node) << "Cannot get metadata for null node";
+
   const int64_t node_id = node->id();
   auto it = node_metadata_.find(node_id);
+
+  // Create new metadata entry if it doesn't exist.
+  // Uses flat_map for better cache locality than unordered_map.
   if (it == node_metadata_.end()) {
     BookmarkMetadata metadata;
     metadata.created = base::Time::Now();
+    // emplace returns pair<iterator, bool>, we want the iterator
     it = node_metadata_.emplace(node_id, std::move(metadata)).first;
   }
+
   return it->second;
 }
 
 int FilteredFoldersComboModel::GetMatchScore(size_t underlying_index) const {
+  // Fast path: no filter means no scoring needed
   if (search_filter_.empty()) {
     return 0;
   }
 
-  // Add null check for underlying model
+  // Null check for underlying model (defensive programming)
   if (!underlying_model_) {
     return -1;
   }
@@ -693,25 +745,33 @@ int FilteredFoldersComboModel::GetMatchScore(size_t underlying_index) const {
     return -1;
   }
 
+  // Pre-compute lowercased strings for fast case-insensitive comparison.
+  // This avoids repeated ToLowerASCII calls in the checks below.
   const std::u16string folder_name =
       underlying_model_->GetItemAt(underlying_index);
   const std::u16string full_path = GetFullPath(node);
   const std::u16string lower_name = base::ToLowerASCII(folder_name);
   const std::u16string lower_path = base::ToLowerASCII(full_path);
 
-  // Enhanced scoring system:
-  // 100 points - Exact match of folder name
-  // 95 points - Exact tag match
-  // 90 points - Folder name starts with filter
-  // 85 points - Description exact match
-  // 80 points - Folder name contains filter as substring
-  // 75 points - Tag substring match
-  // 70 points - Path contains filter as substring
-  // 65 points - Description substring match
-  // 60 points - Fuzzy match on folder name
-  // 55 points - Fuzzy tag match
-  // 50 points - Parent folder matches
-  // Lower scores for less relevant matches
+  // Enhanced multi-tier scoring system (0-100 points).
+  // Higher scores = better matches, shown first in filtered results.
+  //
+  // Scoring tiers are ordered from highest to lowest priority:
+  // 100 points - Exact match of folder name (most specific)
+  //  95 points - Exact tag match (high relevance)
+  //  90 points - Folder name starts with filter (prefix match)
+  //  85 points - Description exact match
+  //  80 points - Folder name contains filter as substring (partial match)
+  //  75 points - Tag substring match
+  //  70 points - Path contains filter as substring (context match)
+  //  65 points - Description substring match
+  //  60 points - Fuzzy match on folder name (typo tolerance)
+  //  55 points - Fuzzy tag match
+  //  50 points - Parent folder matches (hierarchical context)
+  //   0 points - No match (filtered out)
+  //
+  // Performance note: Checks are ordered from fastest to slowest:
+  // exact string comparison > prefix > substring > i18n search > fuzzy
 
   if (lower_name == lower_filter_) {
     return 100;
