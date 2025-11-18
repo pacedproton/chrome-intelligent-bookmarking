@@ -83,6 +83,8 @@ AdvancedBookmarkFeatures::~AdvancedBookmarkFeatures() = default;
 int64_t AdvancedBookmarkFeatures::CreateSmartFolder(
     std::u16string_view name,
     const BookmarkFilter& criteria) {
+  DCHECK(!name.empty()) << "Smart folder name cannot be empty";
+
   SmartFolder folder;
   folder.id = next_smart_folder_id_++;
   folder.name = std::u16string(name);
@@ -104,6 +106,7 @@ void AdvancedBookmarkFeatures::UpdateSmartFolder(
     const BookmarkFilter& criteria) {
   auto it = smart_folders_.find(id);
   if (it == smart_folders_.end()) {
+    DLOG(WARNING) << "Smart folder not found: " << id;
     return;
   }
 
@@ -112,7 +115,9 @@ void AdvancedBookmarkFeatures::UpdateSmartFolder(
 }
 
 void AdvancedBookmarkFeatures::DeleteSmartFolder(int64_t id) {
-  smart_folders_.erase(id);
+  if (smart_folders_.erase(id) == 0) {
+    DLOG(WARNING) << "Smart folder not found for deletion: " << id;
+  }
 }
 
 std::vector<SmartFolder> AdvancedBookmarkFeatures::GetAllSmartFolders() const {
@@ -165,6 +170,8 @@ void AdvancedBookmarkFeatures::RefreshAllSmartFolders() {
 // ===== Collections =====
 
 int64_t AdvancedBookmarkFeatures::CreateCollection(std::u16string_view name) {
+  DCHECK(!name.empty()) << "Collection name cannot be empty";
+
   Collection collection;
   collection.id = next_collection_id_++;
   collection.name = std::u16string(name);
@@ -177,18 +184,23 @@ int64_t AdvancedBookmarkFeatures::CreateCollection(std::u16string_view name) {
 }
 
 void AdvancedBookmarkFeatures::DeleteCollection(int64_t id) {
-  collections_.erase(id);
+  if (collections_.erase(id) == 0) {
+    DLOG(WARNING) << "Collection not found for deletion: " << id;
+  }
 }
 
 void AdvancedBookmarkFeatures::AddToCollection(
     int64_t collection_id,
     const bookmarks::BookmarkNode* bookmark) {
+  DCHECK(bookmark) << "Cannot add null bookmark to collection";
+
   if (!bookmark) {
     return;
   }
 
   auto it = collections_.find(collection_id);
   if (it == collections_.end()) {
+    DLOG(WARNING) << "Collection not found: " << collection_id;
     return;
   }
 
@@ -199,12 +211,15 @@ void AdvancedBookmarkFeatures::AddToCollection(
 void AdvancedBookmarkFeatures::RemoveFromCollection(
     int64_t collection_id,
     const bookmarks::BookmarkNode* bookmark) {
+  DCHECK(bookmark) << "Cannot remove null bookmark from collection";
+
   if (!bookmark) {
     return;
   }
 
   auto it = collections_.find(collection_id);
   if (it == collections_.end()) {
+    DLOG(WARNING) << "Collection not found: " << collection_id;
     return;
   }
 
@@ -980,6 +995,13 @@ std::string AdvancedBookmarkFeatures::GetDomain(const GURL& url) const {
 float AdvancedBookmarkFeatures::CalculateTagSimilarity(
     const bookmarks::BookmarkNode* a,
     const bookmarks::BookmarkNode* b) const {
+  DCHECK(a) << "First bookmark cannot be null";
+  DCHECK(b) << "Second bookmark cannot be null";
+
+  if (!a || !b) {
+    return 0.0f;
+  }
+
   auto tags_a = bookmark_manager_->GetTagsForBookmark(a);
   auto tags_b = bookmark_manager_->GetTagsForBookmark(b);
 
@@ -997,6 +1019,11 @@ float AdvancedBookmarkFeatures::CalculateTagSimilarity(
 
   // Jaccard similarity: intersection / union
   size_t union_size = tags_a.size() + tags_b.size() - shared;
+
+  if (union_size == 0) {
+    return 0.0f;
+  }
+
   return static_cast<float>(shared) / union_size;
 }
 
@@ -1008,6 +1035,7 @@ LinkValidationResult AdvancedBookmarkFeatures::ValidateLinkSync(
 
   if (!bookmark || !bookmark->is_url()) {
     result.status = LinkStatus::kUnknown;
+    result.error_message = "Invalid bookmark";
     return result;
   }
 
@@ -1027,6 +1055,11 @@ LinkValidationResult AdvancedBookmarkFeatures::ValidateLinkSync(
   }
 
   // Assume valid for now (in production, make HTTP HEAD request)
+  // In a real implementation, this would:
+  // 1. Create async HTTP request
+  // 2. Set timeout (e.g., 5 seconds)
+  // 3. Check response code
+  // 4. Handle SSL errors, DNS errors, timeouts
   result.status = LinkStatus::kValid;
   result.http_code = 200;
 

@@ -47,6 +47,7 @@ source_set("unit_tests") {
     "bookmark_manager_unittest.cc",
     "dual_pane_bookmark_manager_view_unittest.cc",
     "advanced_bookmark_features_unittest.cc",
+    "bookmark_integration_test.cc",
   ]
 
   deps = [
