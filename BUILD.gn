@@ -22,6 +22,8 @@
     "bookmark_manager.h",
     "dual_pane_bookmark_manager_view.cc",
     "dual_pane_bookmark_manager_view.h",
+    "advanced_bookmark_features.cc",
+    "advanced_bookmark_features.h",
   ]
 
   deps += [
@@ -44,6 +46,7 @@ source_set("unit_tests") {
     "filtered_folders_combo_model_unittest.cc",
     "bookmark_manager_unittest.cc",
     "dual_pane_bookmark_manager_view_unittest.cc",
+    "advanced_bookmark_features_unittest.cc",
   ]
 
   deps = [
