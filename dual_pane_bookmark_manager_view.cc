@@ -427,21 +427,29 @@ void DualPaneBookmarkManagerView::InitializeUI() {
   // Toolbar
   AddChildView(CreateToolbar());
 
-  // Main content area with split view
-  auto* content_area = AddChildView(std::make_unique<views::View>());
+  // Main content container (holds all state views)
+  content_container_ = AddChildView(std::make_unique<views::View>());
+  content_container_->SetLayoutManager(std::make_unique<views::FillLayout>());
+
+  // Create content area with split view
+  auto content_area = std::make_unique<views::View>();
   content_area->SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kVertical));
 
   // Split view (tree | table)
-  split_view_ = content_area->AddChildView(
+  auto* content_area_ptr = content_area.get();
+  split_view_ = content_area_ptr->AddChildView(
       std::make_unique<views::SplitView>(
           views::SplitView::Orientation::kHorizontal,
           CreateLeftPane(),
           CreateRightPane()));
 
   // Preview pane
-  preview_pane_ = content_area->AddChildView(CreatePreviewPane());
+  preview_pane_ = content_area_ptr->AddChildView(CreatePreviewPane());
   preview_pane_->SetVisible(preview_pane_visible_);
+
+  // Add content area to container
+  content_container_->AddChildView(std::move(content_area));
 
   // Bottom toolbar
   AddChildView(CreateBottomToolbar());
@@ -449,6 +457,10 @@ void DualPaneBookmarkManagerView::InitializeUI() {
   // Initialize with bookmark bar as root
   current_folder_ = bookmark_model_->bookmark_bar_node();
   UpdateBookmarkList();
+
+  // Configure accessibility
+  GetViewAccessibility().SetRole(ax::mojom::Role::kApplication);
+  GetViewAccessibility().SetName(u"Advanced Bookmark Manager");
 }
 
 std::unique_ptr<views::View> DualPaneBookmarkManagerView::CreateToolbar() {
@@ -461,44 +473,61 @@ std::unique_ptr<views::View> DualPaneBookmarkManagerView::CreateToolbar() {
   search_box_ = toolbar->AddChildView(std::make_unique<views::Textfield>());
   search_box_->SetPlaceholderText(u"Search bookmarks...");
   search_box_->set_controller(this);
+  search_box_->SetTooltipText(
+      u"Search bookmarks by title, URL, tags, or description (Ctrl+F)");
+  search_box_->SetAccessibleName(u"Search bookmarks");
   layout->SetFlexForView(search_box_, 1);
 
-  // Action buttons
-  toolbar->AddChildView(
+  // Action buttons with tooltips and accessibility
+  auto* new_folder_btn = toolbar->AddChildView(
       views::MdTextButton::Create(base::BindRepeating(
           &DualPaneBookmarkManagerView::OnNewFolderClicked,
           weak_factory_.GetWeakPtr()),
           u"New Folder"));
+  new_folder_btn->SetTooltipText(u"Create a new bookmark folder");
+  new_folder_btn->SetAccessibleName(u"New Folder");
 
-  toolbar->AddChildView(
+  auto* delete_btn = toolbar->AddChildView(
       views::MdTextButton::Create(base::BindRepeating(
           &DualPaneBookmarkManagerView::OnDeleteClicked,
           weak_factory_.GetWeakPtr()),
           u"Delete"));
+  delete_btn->SetTooltipText(u"Delete selected bookmarks (Delete key)");
+  delete_btn->SetAccessibleName(u"Delete selected bookmarks");
 
-  toolbar->AddChildView(
+  auto* export_btn = toolbar->AddChildView(
       views::MdTextButton::Create(base::BindRepeating(
           &DualPaneBookmarkManagerView::OnExportClicked,
           weak_factory_.GetWeakPtr()),
           u"Export"));
+  export_btn->SetTooltipText(u"Export bookmarks to JSON or HTML file");
+  export_btn->SetAccessibleName(u"Export bookmarks");
 
-  toolbar->AddChildView(
+  auto* import_btn = toolbar->AddChildView(
       views::MdTextButton::Create(base::BindRepeating(
           &DualPaneBookmarkManagerView::OnImportClicked,
           weak_factory_.GetWeakPtr()),
           u"Import"));
+  import_btn->SetTooltipText(u"Import bookmarks from JSON or HTML file");
+  import_btn->SetAccessibleName(u"Import bookmarks");
 
-  toolbar->AddChildView(
+  auto* duplicates_btn = toolbar->AddChildView(
       views::MdTextButton::Create(base::BindRepeating(
           &DualPaneBookmarkManagerView::OnFindDuplicatesClicked,
           weak_factory_.GetWeakPtr()),
           u"Find Duplicates"));
+  duplicates_btn->SetTooltipText(
+      u"Find and manage duplicate bookmarks in your collection");
+  duplicates_btn->SetAccessibleName(u"Find duplicate bookmarks");
 
-  toolbar->AddChildView(
+  auto* settings_btn = toolbar->AddChildView(
       views::MdTextButton::Create(base::BindRepeating(
           &DualPaneBookmarkManagerView::OnSettingsClicked,
           weak_factory_.GetWeakPtr()),
           u"Settings"));
+  settings_btn->SetTooltipText(
+      u"Configure bookmark manager display options and preferences");
+  settings_btn->SetAccessibleName(u"Settings");
 
   return toolbar;
 }
@@ -511,6 +540,12 @@ std::unique_ptr<views::View> DualPaneBookmarkManagerView::CreateLeftPane() {
   auto scroll_view = std::make_unique<views::ScrollView>();
   tree_view_ = scroll_view->SetContents(std::make_unique<views::TreeView>());
   tree_view_->set_controller(this);
+
+  // Accessibility for tree view
+  tree_view_->GetViewAccessibility().SetRole(ax::mojom::Role::kTree);
+  tree_view_->GetViewAccessibility().SetName(u"Bookmark folder hierarchy");
+  tree_view_->GetViewAccessibility().SetDescription(
+      u"Navigate bookmark folders. Use arrow keys to expand/collapse and select folders.");
 
   pane->AddChildView(std::move(scroll_view));
 
@@ -567,6 +602,12 @@ std::unique_ptr<views::View> DualPaneBookmarkManagerView::CreateRightPane() {
   table_view_ = scroll_view->SetContents(
       views::TableView::CreateTableView(/* model */ nullptr, columns));
   table_view_->set_observer(this);
+
+  // Accessibility for table view
+  table_view_->GetViewAccessibility().SetRole(ax::mojom::Role::kTable);
+  table_view_->GetViewAccessibility().SetName(u"Bookmarks list");
+  table_view_->GetViewAccessibility().SetDescription(
+      u"List of bookmarks in selected folder. Use arrow keys to navigate, Space to select, Enter to open.");
 
   pane->AddChildView(std::move(scroll_view));
 
@@ -697,15 +738,19 @@ void DualPaneBookmarkManagerView::UpdateBookmarkList() {
     table_view_->OnModelChanged();
   }
 
-  // Update status
-  if (status_label_) {
-    std::u16string status = base::NumberToString16(displayed_bookmarks_.size()) +
-                           u" bookmarks";
-    if (!current_filter_.search_query.empty()) {
-      status += u" (filtered)";
-    }
-    status_label_->SetText(status);
+  // Show appropriate UI state
+  if (displayed_bookmarks_.empty()) {
+    bool is_filtered = !current_filter_.search_query.empty() ||
+                      current_filter_.favorites_only ||
+                      current_filter_.archived_only ||
+                      current_filter_.min_rating.has_value();
+    ShowEmptyState(is_filtered);
+  } else {
+    ShowContentState();
   }
+
+  // Update status bar
+  UpdateStatusBar();
 }
 
 void DualPaneBookmarkManagerView::UpdatePreview() {
@@ -818,7 +863,7 @@ void DualPaneBookmarkManagerView::ApplySortOrder() {
       }
     }
 
-    return sort_descriptor_.ascending ? result < 0 : result > 0;
+    return result < 0;
   });
 }
 
@@ -1068,4 +1113,235 @@ void DualPaneBookmarkManagerView::OnSettingsClicked() {
   // - Preview pane toggle
   // - Split ratio adjustment
   // - Other UI preferences
+}
+
+// ===== UI Polish Implementations =====
+
+std::unique_ptr<views::View> DualPaneBookmarkManagerView::CreateLoadingState() {
+  auto view = std::make_unique<views::BoxLayoutView>();
+  view->SetOrientation(views::BoxLayout::Orientation::kVertical);
+  view->SetMainAxisAlignment(views::BoxLayout::MainAxisAlignment::kCenter);
+  view->SetCrossAxisAlignment(views::BoxLayout::CrossAxisAlignment::kCenter);
+  view->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(32, 16)));
+
+  // Throbber would go here in full implementation
+  // view->AddChildView(std::make_unique<views::Throbber>());
+
+  auto* label = view->AddChildView(std::make_unique<views::Label>(
+      u"Loading bookmarks...",
+      views::style::CONTEXT_LABEL,
+      views::style::STYLE_SECONDARY));
+  label->SetHorizontalAlignment(gfx::ALIGN_CENTER);
+
+  // Accessibility
+  view->GetViewAccessibility().SetRole(ax::mojom::Role::kStatus);
+  view->GetViewAccessibility().SetName(u"Loading bookmarks");
+
+  return view;
+}
+
+std::unique_ptr<views::View>
+DualPaneBookmarkManagerView::CreateEmptyState(bool is_filtered) {
+  auto view = std::make_unique<views::BoxLayoutView>();
+  view->SetOrientation(views::BoxLayout::Orientation::kVertical);
+  view->SetMainAxisAlignment(views::BoxLayout::MainAxisAlignment::kCenter);
+  view->SetCrossAxisAlignment(views::BoxLayout::CrossAxisAlignment::kCenter);
+  view->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(48, 16)));
+  view->SetBackground(views::CreateThemedSolidBackground(
+      ui::kColorDialogBackground));
+
+  // Icon placeholder (would use ImageView in full implementation)
+
+  // Message
+  std::u16string message;
+  std::u16string suggestion;
+
+  if (is_filtered) {
+    message = u"No bookmarks match your filters";
+    suggestion = u"Try adjusting your search or filter criteria";
+  } else {
+    message = u"No bookmarks yet";
+    suggestion = u"Add bookmarks by clicking the star icon in the address bar";
+  }
+
+  auto* message_label = view->AddChildView(std::make_unique<views::Label>(
+      message,
+      views::style::CONTEXT_LABEL,
+      views::style::STYLE_PRIMARY));
+  message_label->SetHorizontalAlignment(gfx::ALIGN_CENTER);
+  message_label->SetFontList(
+      message_label->font_list().DeriveWithSizeDelta(2).DeriveWithWeight(
+          gfx::Font::Weight::MEDIUM));
+
+  auto* suggestion_label = view->AddChildView(std::make_unique<views::Label>(
+      suggestion,
+      views::style::CONTEXT_LABEL,
+      views::style::STYLE_SECONDARY));
+  suggestion_label->SetHorizontalAlignment(gfx::ALIGN_CENTER);
+  suggestion_label->SetMultiLine(true);
+  suggestion_label->SetMaximumWidth(400);
+
+  // Accessibility
+  view->GetViewAccessibility().SetRole(ax::mojom::Role::kStatus);
+  view->GetViewAccessibility().SetName(message + u". " + suggestion);
+
+  return view;
+}
+
+std::unique_ptr<views::View>
+DualPaneBookmarkManagerView::CreateErrorState(
+    std::u16string_view error_message) {
+  auto view = std::make_unique<views::BoxLayoutView>();
+  view->SetOrientation(views::BoxLayout::Orientation::kVertical);
+  view->SetMainAxisAlignment(views::BoxLayout::MainAxisAlignment::kCenter);
+  view->SetCrossAxisAlignment(views::BoxLayout::CrossAxisAlignment::kCenter);
+  view->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(48, 16)));
+  view->SetBackground(views::CreateThemedSolidBackground(
+      ui::kColorDialogBackground));
+
+  // Error icon placeholder
+
+  // Error message
+  auto* error_label = view->AddChildView(std::make_unique<views::Label>(
+      std::u16string(error_message),
+      views::style::CONTEXT_LABEL,
+      views::style::STYLE_PRIMARY));
+  error_label->SetHorizontalAlignment(gfx::ALIGN_CENTER);
+  error_label->SetMultiLine(true);
+  error_label->SetMaximumWidth(400);
+
+  // Retry button
+  auto* retry_button = view->AddChildView(
+      views::MdTextButton::Create(base::BindRepeating(
+          [](DualPaneBookmarkManagerView* manager) {
+            manager->UpdateBookmarkList();
+            manager->ShowContentState();
+          },
+          base::Unretained(this)),
+          u"Retry"));
+
+  // Accessibility - announce error to screen readers
+  view->GetViewAccessibility().SetRole(ax::mojom::Role::kAlert);
+  view->GetViewAccessibility().SetName(
+      u"Error: " + std::u16string(error_message) + u". Retry button available");
+
+  return view;
+}
+
+void DualPaneBookmarkManagerView::ShowLoadingState() {
+  if (!content_container_) {
+    return;
+  }
+
+  // Hide all other states
+  if (split_view_) split_view_->SetVisible(false);
+  if (empty_state_view_) empty_state_view_->SetVisible(false);
+  if (error_state_view_) error_state_view_->SetVisible(false);
+
+  // Show/create loading state
+  if (!loading_state_view_) {
+    loading_state_view_ = content_container_->AddChildView(CreateLoadingState());
+  }
+  loading_state_view_->SetVisible(true);
+}
+
+void DualPaneBookmarkManagerView::ShowEmptyState(bool is_filtered) {
+  if (!content_container_) {
+    return;
+  }
+
+  // Hide all other states
+  if (split_view_) split_view_->SetVisible(false);
+  if (loading_state_view_) loading_state_view_->SetVisible(false);
+  if (error_state_view_) error_state_view_->SetVisible(false);
+
+  // Remove old empty state if filter status changed
+  if (empty_state_view_) {
+    content_container_->RemoveChildViewT(empty_state_view_.get());
+    empty_state_view_ = nullptr;
+  }
+
+  // Create and show new empty state
+  empty_state_view_ = content_container_->AddChildView(
+      CreateEmptyState(is_filtered));
+  empty_state_view_->SetVisible(true);
+}
+
+void DualPaneBookmarkManagerView::ShowErrorState(
+    std::u16string_view error_message) {
+  if (!content_container_) {
+    return;
+  }
+
+  // Hide all other states
+  if (split_view_) split_view_->SetVisible(false);
+  if (loading_state_view_) loading_state_view_->SetVisible(false);
+  if (empty_state_view_) empty_state_view_->SetVisible(false);
+
+  // Remove old error state
+  if (error_state_view_) {
+    content_container_->RemoveChildViewT(error_state_view_.get());
+    error_state_view_ = nullptr;
+  }
+
+  // Create and show new error state
+  error_state_view_ = content_container_->AddChildView(
+      CreateErrorState(error_message));
+  error_state_view_->SetVisible(true);
+}
+
+void DualPaneBookmarkManagerView::ShowContentState() {
+  if (!content_container_) {
+    return;
+  }
+
+  // Hide all state views
+  if (loading_state_view_) loading_state_view_->SetVisible(false);
+  if (empty_state_view_) empty_state_view_->SetVisible(false);
+  if (error_state_view_) error_state_view_->SetVisible(false);
+
+  // Show content
+  if (split_view_) split_view_->SetVisible(true);
+}
+
+void DualPaneBookmarkManagerView::UpdateStatusBar() {
+  if (!status_label_) {
+    return;
+  }
+
+  std::u16string status = base::NumberToString16(displayed_bookmarks_.size()) +
+                         u" bookmarks";
+
+  if (!current_filter_.search_query.empty()) {
+    status += u" (filtered)";
+  }
+
+  // Show total count
+  size_t total_count = manager_->GetTotalBookmarkCount();
+  if (total_count > displayed_bookmarks_.size()) {
+    status += u" of " + base::NumberToString16(total_count);
+  }
+
+  status_label_->SetText(status);
+}
+
+void DualPaneBookmarkManagerView::SetHealthScore(int score) {
+  // Would display health score in status bar with color coding:
+  // - Green (80-100): Excellent
+  // - Yellow (60-79): Good
+  // - Red (0-59): Needs attention
+
+  if (!status_label_) {
+    return;
+  }
+
+  std::u16string health_text = u" | Health: " + base::NumberToString16(score);
+  std::u16string current_text = status_label_->GetText();
+
+  // Append health score if not already present
+  if (current_text.find(u"Health:") == std::u16string::npos) {
+    status_label_->SetText(current_text + health_text);
+  }
+
+  // In full implementation, would use colored icons or text
 }

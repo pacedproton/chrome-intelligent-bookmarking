@@ -46,8 +46,7 @@ enum class BookmarkColumn {
 
 // Sort order for bookmarks
 struct BookmarkSortDescriptor {
-  BookmarkColumn column = BookmarkColumn::kTitle;
-  bool ascending = true;
+  BookmarkSortOrder order = BookmarkSortOrder::kAlphabetical;
 };
 
 // Undo/Redo action types
@@ -113,7 +112,8 @@ class DualPaneBookmarkManagerView : public views::WidgetDelegateView,
   static void Show(bookmarks::BookmarkModel* model);
 
   // Get current selection
-  std::vector<const bookmarks::BookmarkNode*> GetSelectedBookmarks() const;
+  [[nodiscard]] std::vector<const bookmarks::BookmarkNode*>
+  GetSelectedBookmarks() const;
 
   // ===== Drag and Drop =====
 
@@ -191,7 +191,7 @@ class DualPaneBookmarkManagerView : public views::WidgetDelegateView,
   void OpenSelectedInIncognito();
 
   // Export selected to JSON
-  std::string ExportSelected();
+  [[nodiscard]] std::string ExportSelected();
 
   // Find duplicates in current folder
   void FindDuplicatesInCurrentFolder();
@@ -235,8 +235,23 @@ class DualPaneBookmarkManagerView : public views::WidgetDelegateView,
   // Create preview pane
   std::unique_ptr<views::View> CreatePreviewPane();
 
+  // Create UI polish components
+  std::unique_ptr<views::View> CreateLoadingState();
+  std::unique_ptr<views::View> CreateEmptyState(bool is_filtered);
+  std::unique_ptr<views::View> CreateErrorState(std::u16string_view error_message);
+
   // Update bookmark list based on current folder
   void UpdateBookmarkList();
+
+  // Show/hide different UI states
+  void ShowLoadingState();
+  void ShowEmptyState(bool is_filtered);
+  void ShowErrorState(std::u16string_view error_message);
+  void ShowContentState();
+
+  // Update status bar with health score
+  void UpdateStatusBar();
+  void SetHealthScore(int score);
 
   // Update preview pane with selected bookmark
   void UpdatePreview();
@@ -282,6 +297,12 @@ class DualPaneBookmarkManagerView : public views::WidgetDelegateView,
   raw_ptr<views::SplitView> split_view_ = nullptr;
   raw_ptr<views::View> preview_pane_ = nullptr;
   raw_ptr<views::Label> status_label_ = nullptr;
+
+  // UI Polish Components
+  raw_ptr<views::View> loading_state_view_ = nullptr;
+  raw_ptr<views::View> empty_state_view_ = nullptr;
+  raw_ptr<views::View> error_state_view_ = nullptr;
+  raw_ptr<views::View> content_container_ = nullptr;
 
   // Preview pane components
   raw_ptr<views::Label> preview_title_ = nullptr;
