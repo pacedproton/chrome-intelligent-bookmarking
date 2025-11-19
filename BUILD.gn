@@ -36,6 +36,8 @@
     "bookmark_focus_mode.cc",
     "bookmark_kanban_view.h",
     "bookmark_kanban_view.cc",
+    "bookmark_task_integration_view.h",
+    "bookmark_task_integration_view.cc",
   ]
 
   deps += [
@@ -65,6 +67,7 @@ source_set("unit_tests") {
     "bookmark_integration_test.cc",
     "bookmark_cleanup_wizard_unittest.cc",
     "bookmark_task_manager_unittest.cc",
+    "bookmark_task_ui_test.cc",
   ]
 
   deps = [
