@@ -42,6 +42,8 @@
     "bookmark_sidebar_view.cc",
     "bookmark_smart_workspace.h",
     "bookmark_smart_workspace.cc",
+    "bookmark_alternative_views.h",
+    "bookmark_alternative_views.cc",
   ]
 
   deps += [
@@ -74,6 +76,7 @@ source_set("unit_tests") {
     "bookmark_task_ui_test.cc",
     "bookmark_sidebar_view_unittest.cc",
     "bookmark_smart_workspace_unittest.cc",
+    "bookmark_alternative_views_unittest.cc",
   ]
 
   deps = [
