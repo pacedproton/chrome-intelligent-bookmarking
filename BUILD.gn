@@ -40,6 +40,8 @@
     "bookmark_task_integration_view.cc",
     "bookmark_sidebar_view.h",
     "bookmark_sidebar_view.cc",
+    "bookmark_smart_workspace.h",
+    "bookmark_smart_workspace.cc",
   ]
 
   deps += [
