@@ -8,8 +8,10 @@
 #include <regex>
 #include <utility>
 
+#include "base/check.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/time_formatting.h"
+#include "base/logging.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -204,6 +206,7 @@ int BrowsingContext::CalculateRelevanceScore(
 VisualTaskCard::VisualTaskCard(const bookmarks::BookmarkNode* bookmark,
                                const TaskMetadata* task_metadata)
     : bookmark_(bookmark), task_metadata_(task_metadata) {
+  DCHECK(bookmark_);  // Bookmark must not be null
   CreateLayout();
 }
 
@@ -389,6 +392,8 @@ END_METADATA
 QuickCaptureBar::QuickCaptureBar(BookmarkManager* manager,
                                  BookmarkTaskManager* task_manager)
     : manager_(manager), task_manager_(task_manager) {
+  DCHECK(manager_);       // Manager must not be null
+  DCHECK(task_manager_);  // Task manager must not be null
   CreateLayout();
 }
 
@@ -423,8 +428,12 @@ void QuickCaptureBar::CreateLayout() {
 
 void QuickCaptureBar::CaptureFromText(std::u16string_view text) {
   if (text.empty()) {
+    DLOG(WARNING) << "Attempted to capture empty text";
     return;
   }
+
+  DCHECK(manager_);
+  DCHECK(task_manager_);
 
   TaskMetadata metadata;
   ParseNaturalLanguage(text, metadata);
@@ -443,7 +452,12 @@ void QuickCaptureBar::CaptureFromText(std::u16string_view text) {
 
     if (bookmark) {
       task_manager_->SetTaskMetadata(bookmark, metadata);
+      DLOG(INFO) << "Successfully captured task from natural language";
+    } else {
+      DLOG(ERROR) << "Failed to create bookmark from capture";
     }
+  } else {
+    DLOG(ERROR) << "Bookmark model not available for capture";
   }
 
   recent_captures_.push_back(std::u16string(text));
@@ -599,7 +613,10 @@ END_METADATA
 
 ContextEngine::ContextEngine(BookmarkManager* manager,
                             BookmarkTaskManager* task_manager)
-    : manager_(manager), task_manager_(task_manager) {}
+    : manager_(manager), task_manager_(task_manager) {
+  DCHECK(manager_);       // Manager must not be null
+  DCHECK(task_manager_);  // Task manager must not be null
+}
 
 ContextEngine::~ContextEngine() = default;
 
