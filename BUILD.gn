@@ -24,6 +24,13 @@
     "dual_pane_bookmark_manager_view.h",
     "advanced_bookmark_features.cc",
     "advanced_bookmark_features.h",
+    "bookmark_cleanup_wizard.cc",
+    "bookmark_cleanup_wizard.h",
+    "smart_categorizer.cc",
+    "duplicate_merger.cc",
+    "folder_optimizer.cc",
+    "bulk_tag_suggester.cc",
+    "quick_organizer.cc",
   ]
 
   deps += [
@@ -34,6 +41,7 @@
     "//ui/base",
     "//ui/gfx",
     "//ui/views",
+    "//url",
   ]
 """
 
@@ -50,6 +58,7 @@ source_set("unit_tests") {
     "dual_pane_bookmark_manager_performance_test.cc",
     "advanced_bookmark_features_unittest.cc",
     "bookmark_integration_test.cc",
+    "bookmark_cleanup_wizard_unittest.cc",
   ]
 
   deps = [
